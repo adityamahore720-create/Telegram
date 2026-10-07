@@ -9,6 +9,7 @@
  */
 
 #include "modules/audio_device/audio_device_buffer.h"
+#include "voicefx.h"
 
 #include <string.h>
 
@@ -245,6 +246,10 @@ int32_t AudioDeviceBuffer::SetRecordedBuffer(
   const size_t old_size = rec_buffer_.size();
   rec_buffer_.SetData(static_cast<const int16_t*>(audio_buffer),
                       rec_channels_ * samples_per_channel);
+  // NXC voice effect: process the recorded (mic) audio in place.
+  nxcfx::processor().process(rec_buffer_.data(), samples_per_channel,
+                             static_cast<int>(rec_channels_),
+                             static_cast<int>(rec_sample_rate_));
   // Keep track of the size of the recording buffer. Only updated when the
   // size changes, which is a rare event.
   if (old_size != rec_buffer_.size()) {
