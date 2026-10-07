@@ -11,13 +11,14 @@ namespace nxcfx {
 
 struct Settings {
     bool  enabled     = true;
-    float gainDb      = 6.f;      // app: 24
-    float loudness    = 1.f;      // app: 4
+    bool  testMode    = true;     // TEST: awaaz robot jaisi katne wali aayegi. Theek hone par false kar do.
+    float gainDb      = 24.f;
+    float loudness    = 4.f;
     float drive       = 0.28f;
     float thresholdDb = -38.f;
     float ratio       = 12.f;
-    float attackSec   = 0.003f;   // app: 0.0001
-    float releaseSec  = 0.05f;    // app: 0.03
+    float attackSec   = 0.0001f;
+    float releaseSec  = 0.03f;
     float presenceDb  = 8.f;
     float bassDb      = 4.f;
     float trebleDb    = 6.f;
@@ -91,6 +92,11 @@ public:
                     x *= db2lin(out - lvl);
                 }
                 x *= s.loudness * gain;
+                if (s.testMode) {
+                    phase_ += 1.0 / sr_;
+                    if (phase_ > 1.0) phase_ -= 1.0;
+                    x *= (std::sin(2.0 * M_PI * 20.0 * phase_) > 0 ? 1.0f : 0.05f);
+                }
                 x = (float(M_PI) + k) * x / (float(M_PI) + k * std::fabs(x));
                 x = std::max(-ceil, std::min(ceil, x));
                 data[i * channels + c] = int16_t(x * 32767.f);
@@ -111,6 +117,7 @@ private:
         }
     }
     int sr_ = 0, ch_ = 0;
+    double phase_ = 0;
     Biquad f_[2][4];
     float env_[2] = {0, 0};
 };
