@@ -6,6 +6,10 @@
 #include <cstdint>
 #include <cstddef>
 #include <algorithm>
+#include <atomic>
+#ifdef __ANDROID__
+#include <jni.h>
+#endif
 
 namespace nxcfx {
 
@@ -26,6 +30,7 @@ struct Settings {
 };
 
 inline Settings& settings() { static Settings s; return s; }
+inline std::atomic<bool>& dirty() { static std::atomic<bool> d(false); return d; }
 
 struct Biquad {
     float b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, z1 = 0, z2 = 0;
@@ -67,7 +72,7 @@ public:
     void process(int16_t* data, size_t frames, int channels, int sampleRate) {
         const Settings& s = settings();
         if (!s.enabled || channels < 1 || channels > 2 || frames == 0) return;
-        if (sampleRate != sr_ || channels != ch_) init(sampleRate, channels, s);
+        if (sampleRate != sr_ || channels != ch_ || dirty().exchange(false)) init(sampleRate, channels, s);
 
         const float gain = db2lin(s.gainDb);
         const float ceil = db2lin(s.limiterDb);
@@ -125,3 +130,17 @@ private:
 inline Processor& processor() { static Processor p; return p; }
 
 } // namespace nxcfx
+
+#ifdef __ANDROID__
+// Java (VoiceFxBridge) se live slider values yahan aati hain.
+extern "C" JNIEXPORT void JNICALL
+Java_org_telegram_messenger_VoiceFxBridge_nativeSet(JNIEnv*, jclass,
+        jfloat gain, jfloat loudness, jfloat drive, jfloat thr,
+        jfloat presence, jfloat bass, jfloat treble, jfloat limiter) {
+    nxcfx::Settings& s = nxcfx::settings();
+    s.gainDb = gain; s.loudness = loudness; s.drive = drive;
+    s.thresholdDb = thr; s.presenceDb = presence; s.bassDb = bass;
+    s.trebleDb = treble; s.limiterDb = limiter;
+    nxcfx::dirty().store(true);
+}
+#endif
