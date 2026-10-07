@@ -1,1 +1,51 @@
+name: Build Telegram APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      # IMPORTANT: ye wahi hona chahiye jo build.gradle me applicationId hai
+      APP_PACKAGE: com.nxc.fighter
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Accept Android licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
+      - name: Create dummy google-services.json (agar nahi hai)
+        run: |
+          for d in TMessagesProj TMessagesProj_App; do
+            if [ -d "$d" ] && [ ! -f "$d/google-services.json" ]; then
+              cat > "$d/google-services.json" << JSON
+          {"project_info":{"project_number":"1","project_id":"dummy","storage_bucket":"dummy.appspot.com"},
+           "client":[{"client_info":{"mobilesdk_app_id":"1:1:android:1","android_client_info":{"package_name":"$APP_PACKAGE"}},
+           "api_key":[{"current_key":"dummy"}]}],"configuration_version":"1"}
+          JSON
+            fi
+          done
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :TMessagesProj_App:assembleAfatDebug \
+            || ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-apk
+          path: |
+            **/build/outputs/apk/**/*.apk
 
