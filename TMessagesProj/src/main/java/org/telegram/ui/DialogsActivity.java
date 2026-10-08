@@ -5988,6 +5988,15 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         }
         if (isInPreviewMode()) {
             dialogsHintCellVisible = false;
+        } else if (folderId == 0 && communityId == 0) {
+            dialogsHintCellVisible = true;
+            dialogsHintCell.showImage();
+            dialogsHintCell.imageView.setRoundRadius(dp(8));
+            dialogsHintCell.imageView.setImageDrawable(getContext().getResources().getDrawable(R.drawable.nxc_logo));
+            dialogsHintCell.setText("NXC FIGHTER", "Created by @NXC_OWNERJI");
+            dialogsHintCell.setOnClickListener(v -> {
+                Browser.openUrl(getContext(), "https://t.me/NXC_UPDATE");
+            });
         } else if (getMessagesController().isFrozen()) {
             dialogsHintCellVisible = true;
             dialogsHintCell.setOnClickListener(v -> {
