@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/icon_background_round" />
-    <foreground android:drawable="@mipmap/icon_foreground_round" />
-    <monochrome android:drawable="@drawable/icon_plane" />
+    <background>
+        <shape android:shape="rectangle">
+            <solid android:color="#020A22" />
+        </shape>
+    </background>
+    <foreground>
+        <inset android:drawable="@drawable/nxc_icon" android:inset="12%" />
+    </foreground>
 </adaptive-icon>
