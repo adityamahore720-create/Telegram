@@ -6,7 +6,7 @@ public class VoiceFxBridge {
                                          float presence, float bass, float treble, float limiter);
 
     // Order: 0 Gain, 1 Loudness, 2 Drive, 3 Threshold, 4 Presence, 5 Bass, 6 Treble, 7 Limiter
-    public static final float[] DEF = {24f, 4f, 0.28f, -38f, 8f, 4f, 6f, -2f};
+    public static final float[] DEF = {18f, 4f, 0.28f, -38f, 8f, 3f, 6f, -2f};
     public static final float[] cur = DEF.clone();
 
     public static void apply() {
