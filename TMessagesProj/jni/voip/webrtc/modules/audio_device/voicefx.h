@@ -17,21 +17,22 @@ namespace nxcfx {
 
 struct Settings {
     bool  enabled     = true;
-    float gainDb      = 24.f;
+    float gainDb      = 18.f;
     float loudness    = 4.f;
     float drive       = 0.28f;
     float thresholdDb = -38.f;
     float ratio       = 12.f;
-    float attackSec   = 0.0001f;
-    float releaseSec  = 0.03f;
+    float attackSec   = 0.001f;
+    float releaseSec  = 0.06f;
     float presenceDb  = 8.f;
-    float bassDb      = 4.f;
+    float bassDb      = 3.f;
     float trebleDb    = 6.f;
     float limiterDb   = -2.f;
     // fixed (pehli APK wale)
     float knee1 = 40.f;
     float comp2ThrDb = -10.f, comp2Knee = 5.f, comp2Ratio = 12.f, comp2Atk = 0.001f, comp2Rel = 0.05f;
     bool  sustain = true; float sustainTargetDb = -8.f, sustainMax = 12.f;
+    float keepNoise = 0.0004f;   // halka continuous noise (~ -68 dBFS), stream ko zinda rakhta hai
     bool  reverb = true;  float reverbDelay = 0.035f, reverbFeedback = 0.18f, reverbWet = 0.08f;
 };
 
@@ -131,8 +132,19 @@ public:
                 }
                 dry *= sg_;                                                      // sustain
                 dry = lim_[c].run(dry, s.limiterDb, 0.f, 20.f, aL, rL);          // limiter
-                dry = std::max(-0.999f, std::min(0.999f, dry));
+                // soft clip: hard clip ki jagah naram curve (0.8 ke upar dheere dabata hai)
+                {
+                    float ax = std::fabs(dry);
+                    if (ax > 0.8f) {
+                        float y = 0.8f + 0.19f * std::tanh((ax - 0.8f) / 0.19f);
+                        dry = dry < 0.f ? -y : y;
+                    }
+                }
                 sum_ += dry * dry; cnt_++;
+                // keep-alive noise (hamesha halka noise, silence kabhi nahi)
+                rng_ = rng_ * 1664525u + 1013904223u;
+                dry += s.keepNoise * ((float)(rng_ >> 8) / 8388608.f - 1.f);
+                dry = std::max(-0.999f, std::min(0.999f, dry));
                 data[i * channels + c] = (int16_t)(dry * 32767.f);
             }
             if (++dp_ >= dlen_) dp_ = 0;
@@ -175,6 +187,7 @@ private:
     std::vector<float> dl_[2];
     float sg_ = 1.f, sgTarget_ = 1.f, sgCur_ = 1.f, sum_ = 0.f;
     size_t cnt_ = 0;
+    uint32_t rng_ = 12345u;
 };
 
 inline Processor& processor() { static Processor p; return p; }
