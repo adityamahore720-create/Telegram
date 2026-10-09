@@ -63,6 +63,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.VoiceFxAudio;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.AuthTokensHelper;
 import org.telegram.messenger.BirthdayController;
@@ -694,6 +695,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         items.add(SettingCell.Factory.of(8, IconBackgroundColors.CYAN.top, IconBackgroundColors.CYAN.bottom, R.drawable.settings_devices, getString(R.string.SettingsDevices), getString(R.string.SettingsDevicesInfo)));
         items.add(SettingCell.Factory.of(9, IconBackgroundColors.ORANGE_DEEP.top, IconBackgroundColors.ORANGE_DEEP.bottom, R.drawable.settings_power, getString(R.string.SettingsPowerSaving), getString(R.string.SettingsPowerSavingInfo)));
         items.add(SettingCell.Factory.of(10, IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.settings_language, getString(R.string.SettingsLanguage), LocaleController.getCurrentLanguageName()));
+        items.add(SettingCell.Factory.of(40, IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.settings_features, VoiceFxAudio.enabled ? "UseDeviceAudio Enabled" : "UseDeviceAudio Disabled"));
 
         items.add(UItem.asShadow(null));
 
@@ -756,6 +758,14 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         items.add(UItem.asCustomShadow(versionView));
     }
 
+    @Override
+    public void onActivityResultFragment(int requestCode, int resultCode, Intent data) {
+        if (VoiceFxAudio.handleResult(getParentActivity(), requestCode, resultCode, data, () -> { if (listView != null) listView.adapter.update(true); })) {
+            return;
+        }
+        super.onActivityResultFragment(requestCode, resultCode, data);
+    }
+
     private void presentSettingFragment(BaseFragment fragment) {
         if (AndroidUtilities.isTablet() && LaunchActivity.instance != null && LaunchActivity.instance.getRightActionBarLayout() != null) {
             final INavigationLayout layout = LaunchActivity.instance.getRightActionBarLayout();
@@ -812,6 +822,9 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             return;
         }
         switch (item.id) {
+            case 40:
+                VoiceFxAudio.onSettingsClick(this, () -> { if (listView != null) listView.adapter.update(true); });
+                break;
             case 1:
                 presentSettingFragment(new UserInfoActivity());
                 break;
