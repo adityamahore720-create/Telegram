@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <atomic>
 #include <vector>
+#include <mutex>
 #ifdef __ANDROID__
 #include <jni.h>
 #endif
@@ -37,6 +38,16 @@ struct Settings {
 };
 
 inline Settings& settings() { static Settings s; return s; }
+// Phone ki audio file (UseDeviceAudio): 48 kHz mono PCM, mic ke saath mix hoti hai
+struct Clip {
+    std::mutex mx;
+    std::vector<int16_t> pcm;
+    double pos = 0;
+    bool playing = false;
+    float gain = 1.0f;
+};
+inline Clip& clip() { static Clip c; return c; }
+
 inline std::atomic<bool>& dirty() { static std::atomic<bool> d(false); return d; }
 
 struct Biquad {
@@ -104,6 +115,10 @@ public:
         else if (dirty().exchange(false)) setFilters(s);
 
         const float sr = (float)sr_;
+        // UseDeviceAudio: sirf tab bajta hai jab mic ON ho (process tabhi chalta hai)
+        std::unique_lock<std::mutex> clk(clip().mx, std::try_to_lock);
+        bool useClip = clk.owns_lock() && clip().playing && !clip().pcm.empty();
+        const double cstep = 48000.0 / (double)sr_;
         const float gain = db2lin(s.gainDb);
         const float k = std::max(0.0001f, s.drive * 100.f);
         const float a1 = std::exp(-1.f / (std::max(s.attackSec, 1e-5f) * sr));
@@ -117,6 +132,12 @@ public:
         const float fb = s.reverb ? s.reverbFeedback : 0.f;
 
         for (size_t i = 0; i < frames; i++) {
+            float cs = 0.f;
+            if (useClip) {
+                size_t ci = (size_t)clip().pos;
+                if (ci >= clip().pcm.size()) { clip().playing = false; useClip = false; }
+                else { cs = clip().pcm[ci] / 32768.f * clip().gain; clip().pos += cstep; }
+            }
             for (int c = 0; c < channels; c++) {
                 float x = data[i * channels + c] / 32768.f;
                 x = f_[c][0].run(x); x = f_[c][1].run(x); x = f_[c][2].run(x); x = f_[c][3].run(x);
@@ -144,6 +165,7 @@ public:
                 // keep-alive noise (hamesha halka noise, silence kabhi nahi)
                 rng_ = rng_ * 1664525u + 1013904223u;
                 dry += s.keepNoise * ((float)(rng_ >> 8) / 8388608.f - 1.f);
+                dry += cs;   // phone ki file ki awaaz (effect chain ke baad, saaf)
                 dry = std::max(-0.999f, std::min(0.999f, dry));
                 data[i * channels + c] = (int16_t)(dry * 32767.f);
             }
@@ -204,5 +226,31 @@ Java_org_telegram_messenger_VoiceFxBridge_nativeSet(JNIEnv*, jclass,
     s.thresholdDb = thr; s.presenceDb = presence; s.bassDb = bass;
     s.trebleDb = treble; s.limiterDb = limiter;
     nxcfx::dirty().store(true);
+}
+#endif
+
+#ifdef __ANDROID__
+extern "C" JNIEXPORT void JNICALL
+Java_org_telegram_messenger_VoiceFxAudio_nativeClipClear(JNIEnv*, jclass) {
+    nxcfx::Clip& c = nxcfx::clip();
+    std::lock_guard<std::mutex> l(c.mx);
+    c.playing = false; c.pos = 0;
+    std::vector<int16_t>().swap(c.pcm);
+}
+extern "C" JNIEXPORT void JNICALL
+Java_org_telegram_messenger_VoiceFxAudio_nativeClipAppend(JNIEnv* env, jclass, jshortArray arr, jint len) {
+    if (len <= 0) return;
+    std::vector<int16_t> tmp((size_t)len);
+    env->GetShortArrayRegion(arr, 0, len, (jshort*)tmp.data());
+    nxcfx::Clip& c = nxcfx::clip();
+    std::lock_guard<std::mutex> l(c.mx);
+    c.pcm.insert(c.pcm.end(), tmp.begin(), tmp.end());
+}
+extern "C" JNIEXPORT void JNICALL
+Java_org_telegram_messenger_VoiceFxAudio_nativeClipPlay(JNIEnv*, jclass, jboolean play) {
+    nxcfx::Clip& c = nxcfx::clip();
+    std::lock_guard<std::mutex> l(c.mx);
+    if (play) c.pos = 0;
+    c.playing = play;
 }
 #endif
