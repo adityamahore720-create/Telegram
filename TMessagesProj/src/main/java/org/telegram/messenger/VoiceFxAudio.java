@@ -9,6 +9,7 @@ import android.media.MediaFormat;
 import android.net.Uri;
 import android.widget.Toast;
 
+import org.telegram.messenger.voip.VoIPService;
 import org.telegram.ui.ActionBar.BaseFragment;
 
 import java.nio.ByteBuffer;
@@ -32,6 +33,12 @@ public class VoiceFxAudio {
             enabled = false;
             try { nativeClipPlay(false); nativeClipClear(); } catch (Throwable ignore) {}
             if (refresh != null) refresh.run();
+            return;
+        }
+        // File tabhi khulegi jab VC/call chal rahi ho aur mic ON ho
+        VoIPService svc = VoIPService.getSharedInstance();
+        if (svc == null || svc.isMicMute()) {
+            Toast.makeText(ApplicationLoader.applicationContext, "Pehle VC/call me mic ON karo", Toast.LENGTH_SHORT).show();
             return;
         }
         try {
