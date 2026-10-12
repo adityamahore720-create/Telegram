@@ -29,7 +29,7 @@ public class VoiceFxPanel {
     private static final String[] NAMES = {"Gain (dB)", "Loudness Trim", "Saturation Drive",
             "Compressor Threshold (dB)", "Presence EQ (dB)", "Bass EQ (dB)", "Treble EQ (dB)", "Limiter Ceiling (dB)"};
     private static final float[] MIN = {0f, 0f, 0f, -60f, 0f, 0f, 0f, -12f};
-    private static final float[] MAX = {40f, 11f, 1f, 0f, 12f, 8f, 12f, 0f};
+    private static final float[] MAX = {60f, 20f, 1f, 0f, 20f, 12f, 20f, 0f};
     private static final int STEPS = 1000;
     private static final String TAG = "nxc_fx_logo";
     private static SharedPreferences prefs;
@@ -39,6 +39,7 @@ public class VoiceFxPanel {
         for (int i = 0; i < 8; i++) {
             VoiceFxBridge.cur[i] = prefs.getFloat("v" + i, VoiceFxBridge.DEF[i]);
         }
+        VoiceFxBridge.fxOn = prefs.getBoolean("fx_on", true);
         VoiceFxBridge.apply();
         app.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
             @Override public void onActivityResumed(Activity a) { attach(a); }
@@ -114,6 +115,35 @@ public class VoiceFxPanel {
         title.setGravity(Gravity.CENTER);
         col.addView(title);
 
+        final TextView fxBtn = new TextView(act);
+        fxBtn.setTextColor(Color.WHITE);
+        fxBtn.setTextSize(16);
+        fxBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        fxBtn.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(act, 46));
+        flp.topMargin = dp(act, 14);
+        fxBtn.setLayoutParams(flp);
+        final Runnable paint = new Runnable() {
+            @Override public void run() {
+                GradientDrawable g = new GradientDrawable();
+                g.setCornerRadius(dp(act, 14));
+                if (VoiceFxBridge.fxOn) { g.setColor(0xFF1B5E20); g.setStroke(dp(act, 2), 0xFF00E676); fxBtn.setText("VOICE EFFECT: ON"); }
+                else { g.setColor(0xFF333333); g.setStroke(dp(act, 2), 0xFF9E9E9E); fxBtn.setText("EFFECT OFF (normal voice)"); }
+                fxBtn.setBackground(g);
+            }
+        };
+        paint.run();
+        fxBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                VoiceFxBridge.fxOn = !VoiceFxBridge.fxOn;
+                VoiceFxBridge.apply();
+                save();
+                paint.run();
+            }
+        });
+        col.addView(fxBtn);
+
         for (int i = 0; i < 8; i++) {
             final int idx = i;
             final TextView label = new TextView(act);
@@ -185,6 +215,7 @@ public class VoiceFxPanel {
         if (prefs == null) return;
         SharedPreferences.Editor ed = prefs.edit();
         for (int i = 0; i < 8; i++) ed.putFloat("v" + i, VoiceFxBridge.cur[i]);
+        ed.putBoolean("fx_on", VoiceFxBridge.fxOn);
         ed.apply();
     }
 }

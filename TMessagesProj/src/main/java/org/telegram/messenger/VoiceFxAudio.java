@@ -22,10 +22,22 @@ public class VoiceFxAudio {
     private static final long MAX_OUT_SAMPLES = 48000L * 60 * 10; // 10 minute
 
     public static volatile boolean enabled = false;
+    private static volatile boolean pending = false;
+    private static Runnable pendingRefresh;
+
+    private static final NotificationCenter.NotificationCenterDelegate delegate = new NotificationCenter.NotificationCenterDelegate() {
+        @Override public void didReceivedNotification(int id, int account, Object... args) {
+            if (id == NotificationCenter.onActivityResultReceived && args != null && args.length >= 3) {
+                handleResult(null, (Integer) args[0], (Integer) args[1], (Intent) args[2], pendingRefresh);
+            }
+        }
+    };
 
     private static native void nativeClipClear();
     private static native void nativeClipAppend(short[] data, int len);
     private static native void nativeClipPlay(boolean play);
+    private static native int nativeClipPos();
+    private static native long nativeProcessCount();
 
     /** Settings row tap: Enabled hai to band karo, warna file chunne ka picker kholo. */
     public static void onSettingsClick(BaseFragment fragment, Runnable refresh) {
@@ -45,6 +57,10 @@ public class VoiceFxAudio {
             Intent i = new Intent(Intent.ACTION_GET_CONTENT);
             i.setType("audio/*");
             i.addCategory(Intent.CATEGORY_OPENABLE);
+            pending = true;
+            pendingRefresh = refresh;
+            NotificationCenter.getGlobalInstance().removeObserver(delegate, NotificationCenter.onActivityResultReceived);
+            NotificationCenter.getGlobalInstance().addObserver(delegate, NotificationCenter.onActivityResultReceived);
             fragment.startActivityForResult(i, REQ);
         } catch (Throwable t) {
             FileLog.e(t);
@@ -54,11 +70,15 @@ public class VoiceFxAudio {
     /** Fragment ke onActivityResultFragment se call karo. */
     public static boolean handleResult(Activity act, int req, int res, Intent data, final Runnable refresh) {
         if (req != REQ) return false;
+        if (!pending) return true;   // pehle hi handle ho chuka
+        pending = false;
+        NotificationCenter.getGlobalInstance().removeObserver(delegate, NotificationCenter.onActivityResultReceived);
         if (res != Activity.RESULT_OK || data == null || data.getData() == null) return true;
         final Uri uri = data.getData();
         new Thread(new Runnable() {
             @Override public void run() {
                 boolean ok = false;
+                String err = null;
                 try {
                     nativeClipPlay(false);
                     nativeClipClear();
@@ -67,14 +87,29 @@ public class VoiceFxAudio {
                     ok = true;
                 } catch (Throwable t) {
                     FileLog.e(t);
+                    err = t.toString();
                     try { nativeClipClear(); } catch (Throwable ignore) {}
                 }
                 enabled = ok;
                 final boolean fok = ok;
+                final String ferr = err;
                 AndroidUtilities.runOnUIThread(new Runnable() {
                     @Override public void run() {
                         if (!fok) {
-                            Toast.makeText(ApplicationLoader.applicationContext, "Audio file load nahi hui", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(ApplicationLoader.applicationContext, "Audio load nahi hui: " + ferr, Toast.LENGTH_LONG).show();
+                        } else {
+                            Toast.makeText(ApplicationLoader.applicationContext, "Audio load OK (" + (outTotal / 48000) + " sec). Mic ON rakho.", Toast.LENGTH_LONG).show();
+                            AndroidUtilities.runOnUIThread(new Runnable() {
+                                @Override public void run() {
+                                    try {
+                                        Toast.makeText(ApplicationLoader.applicationContext,
+                                                "DEBUG mic chunks=" + nativeProcessCount() + " pos=" + nativeClipPos(),
+                                                Toast.LENGTH_LONG).show();
+                                    } catch (Throwable t) {
+                                        Toast.makeText(ApplicationLoader.applicationContext, "DEBUG native link error", Toast.LENGTH_LONG).show();
+                                    }
+                                }
+                            }, 3000);
                         }
                         if (refresh != null) refresh.run();
                     }
