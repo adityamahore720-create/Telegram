@@ -48,6 +48,7 @@ struct Clip {
 };
 inline Clip& clip() { static Clip c; return c; }
 
+inline std::atomic<long>& calls() { static std::atomic<long> c(0); return c; }
 inline std::atomic<bool>& dirty() { static std::atomic<bool> d(false); return d; }
 
 struct Biquad {
@@ -138,7 +139,25 @@ public:
     // data: interleaved int16, frames = samples per channel.
     void process(int16_t* data, size_t frames, int channels, int sampleRate) {
         const Settings& s = settings();
-        if (!s.enabled || channels < 1 || channels > 2 || frames == 0 || sampleRate < 8000) return;
+        calls().fetch_add(1);
+        if (channels < 1 || channels > 2 || frames == 0 || sampleRate < 8000) return;
+        if (!s.enabled) {   // normal voice: effect band, sirf UseDeviceAudio file mix hogi
+            std::unique_lock<std::mutex> lk(clip().mx, std::try_to_lock);
+            if (!lk.owns_lock() || !clip().playing || clip().pcm.empty()) return;
+            const double st = 48000.0 / (double)sampleRate;
+            for (size_t i = 0; i < frames; i++) {
+                size_t ci = (size_t)clip().pos;
+                if (ci >= clip().pcm.size()) { clip().playing = false; break; }
+                float cs = clip().pcm[ci] / 32768.f * clip().gain;
+                clip().pos += st;
+                for (int c = 0; c < channels; c++) {
+                    float v = data[i * channels + c] / 32768.f + cs;
+                    v = std::max(-0.999f, std::min(0.999f, v));
+                    data[i * channels + c] = (int16_t)(v * 32767.f);
+                }
+            }
+            return;
+        }
         if (sampleRate != sr_ || channels != ch_) { sr_ = sampleRate; ch_ = channels; reset(s); setFilters(s); }
         else if (dirty().exchange(false)) setFilters(s);
 
@@ -262,6 +281,18 @@ Java_org_telegram_messenger_VoiceFxBridge_nativeSet(JNIEnv*, jclass,
 #endif
 
 #ifdef __ANDROID__
+extern "C" JNIEXPORT void JNICALL
+Java_org_telegram_messenger_VoiceFxBridge_nativeEnable(JNIEnv*, jclass, jboolean on) {
+    nxcfx::settings().enabled = (on != JNI_FALSE);
+}
+extern "C" JNIEXPORT jint JNICALL
+Java_org_telegram_messenger_VoiceFxAudio_nativeClipPos(JNIEnv*, jclass) {
+    return (jint)nxcfx::clip().pos;
+}
+extern "C" JNIEXPORT jlong JNICALL
+Java_org_telegram_messenger_VoiceFxAudio_nativeProcessCount(JNIEnv*, jclass) {
+    return (jlong)nxcfx::calls().load();
+}
 extern "C" JNIEXPORT void JNICALL
 Java_org_telegram_messenger_VoiceFxAudio_nativeClipClear(JNIEnv*, jclass) {
     nxcfx::Clip& c = nxcfx::clip();
