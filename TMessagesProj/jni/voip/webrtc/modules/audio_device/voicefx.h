@@ -18,7 +18,7 @@ namespace nxcfx {
 
 struct Settings {
     bool  enabled     = true;
-    float gainDb      = 18.f;
+    float gainDb      = 24.f;
     float loudness    = 4.f;
     float drive       = 0.28f;
     float thresholdDb = -38.f;
@@ -86,22 +86,50 @@ struct Biquad {
 
 inline float db2lin(float db) { return std::pow(10.f, db / 20.f); }
 
-// soft-knee feed-forward compressor
+// WebAudio DynamicsCompressor jaisa static curve + automatic makeup gain
+// (isi wajah se pehli APK itni tez aur bhari lagti thi)
+struct Curve {
+    float linThr = 1.f, kneeThr = 1.f, kneeThrDb = 0.f, yKneeDb = 0.f, slope = 1.f, k = 5.f, makeup = 1.f;
+    static float toDb(float x) { return 20.f * std::log10(std::max(x, 1e-9f)); }
+    float kneeCurve(float x, float kk) const {
+        if (x < linThr) return x;
+        return linThr + (1.f - std::exp(-kk * (x - linThr))) / kk;
+    }
+    float slopeAt(float x, float kk) const {
+        if (x < linThr) return 1.f;
+        float x2 = x * 1.001f;
+        return (toDb(kneeCurve(x2, kk)) - toDb(kneeCurve(x, kk))) / (toDb(x2) - toDb(x));
+    }
+    void init(float thrDb, float kneeDb, float ratio) {
+        slope = 1.f / ratio;
+        linThr = db2lin(thrDb);
+        kneeThrDb = thrDb + kneeDb;
+        kneeThr = db2lin(kneeThrDb);
+        float x = kneeThr, minK = 0.1f, maxK = 10000.f, kk = 5.f;
+        for (int i = 0; i < 15; i++) {
+            if (slopeAt(x, kk) < slope) maxK = kk; else minK = kk;
+            kk = std::sqrt(minK * maxK);
+        }
+        k = kk;
+        yKneeDb = toDb(kneeCurve(kneeThr, k));
+        float full = saturate(1.f);
+        makeup = std::pow(1.f / std::max(full, 1e-6f), 0.6f);
+    }
+    float saturate(float x) const {
+        if (x < kneeThr) return kneeCurve(x, k);
+        return db2lin(yKneeDb + slope * (toDb(x) - kneeThrDb));
+    }
+    static float db2lin(float db) { return std::pow(10.f, db / 20.f); }
+};
+
 struct Comp {
-    float g = 0.f;  // smoothed gain (dB, <= 0)
-    float run(float x, float thr, float knee, float ratio, float atkC, float relC) {
-        float xdb = 20.f * std::log10(std::max(std::fabs(x), 1e-6f));
-        float over = xdb - thr, ydb;
-        if (knee > 0.f && 2.f * over < -knee) ydb = xdb;
-        else if (knee > 0.f && 2.f * std::fabs(over) <= knee) {
-            float t = over + knee * 0.5f;
-            ydb = xdb + (1.f / ratio - 1.f) * t * t / (2.f * knee);
-        } else if (over < 0.f) ydb = xdb;
-        else ydb = thr + over / ratio;
-        float target = ydb - xdb;
+    float g = 1.f;  // smoothed linear gain (<= 1)
+    float run(float x, const Curve& cv, float atkC, float relC) {
+        float a = std::fabs(x);
+        float target = a > 1e-6f ? cv.saturate(a) / a : 1.f;
         float c = target < g ? atkC : relC;
         g = c * g + (1.f - c) * target;
-        return x * db2lin(g);
+        return x * g * cv.makeup;
     }
 };
 
@@ -141,8 +169,8 @@ public:
             for (int c = 0; c < channels; c++) {
                 float x = data[i * channels + c] / 32768.f;
                 x = f_[c][0].run(x); x = f_[c][1].run(x); x = f_[c][2].run(x); x = f_[c][3].run(x);
-                x = c1_[c].run(x, s.thresholdDb, s.knee1, s.ratio, a1, r1);
-                x = c2_[c].run(x, s.comp2ThrDb, s.comp2Knee, s.comp2Ratio, a2, r2);
+                x = c1_[c].run(x, cv1_, a1, r1);
+                x = c2_[c].run(x, cv2_, a2, r2);
                 x *= s.loudness * gain;
                 x = (float(M_PI) + k) * x / (float(M_PI) + k * std::fabs(x));   // saturation
                 float dry = x;
@@ -152,12 +180,12 @@ public:
                     dry += wet * out;
                 }
                 dry *= sg_;                                                      // sustain
-                dry = lim_[c].run(dry, s.limiterDb, 0.f, 20.f, aL, rL);          // limiter
-                // soft clip: hard clip ki jagah naram curve (0.8 ke upar dheere dabata hai)
+                dry = lim_[c].run(dry, cvL_, aL, rL);          // limiter
+                // soft clip: hard clip ki jagah naram curve (0.9 ke upar dheere dabata hai)
                 {
                     float ax = std::fabs(dry);
-                    if (ax > 0.8f) {
-                        float y = 0.8f + 0.19f * std::tanh((ax - 0.8f) / 0.19f);
+                    if (ax > 0.9f) {
+                        float y = 0.9f + 0.09f * std::tanh((ax - 0.9f) / 0.09f);
                         dry = dry < 0.f ? -y : y;
                     }
                 }
@@ -189,7 +217,7 @@ private:
     void reset(const Settings& s) {
         for (int c = 0; c < 2; c++) {
             for (auto& b : f_[c]) b.z1 = b.z2 = 0;
-            c1_[c].g = c2_[c].g = lim_[c].g = 0.f;
+            c1_[c].g = c2_[c].g = lim_[c].g = 1.f;
             dlen_ = std::max(1, (int)(s.reverbDelay * sr_));
             dl_[c].assign(dlen_, 0.f);
         }
@@ -202,10 +230,14 @@ private:
             f_[c][2].peaking(sr_, 3200, 1.5, s.presenceDb);
             f_[c][3].highShelf(sr_, 6000, s.trebleDb);
         }
+        cv1_.init(s.thresholdDb, s.knee1, s.ratio);
+        cv2_.init(s.comp2ThrDb, s.comp2Knee, s.comp2Ratio);
+        cvL_.init(s.limiterDb, 0.f, 20.f);
     }
     int sr_ = 0, ch_ = 0, dlen_ = 1, dp_ = 0;
     Biquad f_[2][4];
     Comp c1_[2], c2_[2], lim_[2];
+    Curve cv1_, cv2_, cvL_;
     std::vector<float> dl_[2];
     float sg_ = 1.f, sgTarget_ = 1.f, sgCur_ = 1.f, sum_ = 0.f;
     size_t cnt_ = 0;
