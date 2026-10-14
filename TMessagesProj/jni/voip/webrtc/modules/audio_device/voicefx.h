@@ -33,6 +33,9 @@ struct Settings {
     float knee1 = 40.f;
     float comp2ThrDb = -10.f, comp2Knee = 5.f, comp2Ratio = 12.f, comp2Atk = 0.001f, comp2Rel = 0.05f;
     bool  sustain = true; float sustainTargetDb = -8.f, sustainMax = 12.f;
+    // clarity: gunj (mud) kam + halka noise gate
+    float mudDb = -3.5f, mudFreq = 320.f;
+    float gateDb = -48.f, gateFloor = 0.004f;
     float keepNoise = 0.0004f;   // halka continuous noise (~ -68 dBFS), stream ko zinda rakhta hai
     bool  reverb = true;  float reverbDelay = 0.035f, reverbFeedback = 0.18f, reverbWet = 0.08f;
 };
@@ -175,6 +178,12 @@ public:
         const float aL = std::exp(-1.f / (0.0001f * sr));
         const float rL = std::exp(-1.f / (0.01f * sr));
         const int blockLen = (int)(0.12f * sr);
+        const float gThr = db2lin(s.gateDb);
+        const float gAtk = std::exp(-1.f / (0.002f * sr));
+        const float gRel = std::exp(-1.f / (0.060f * sr));
+        const float gOpenC = std::exp(-1.f / (0.003f * sr));
+        const float gCloseC = std::exp(-1.f / (0.040f * sr));
+        const int gHold = (int)(0.150f * sr);
         const float wet = s.reverb ? s.reverbWet : 0.f;
         const float fb = s.reverb ? s.reverbFeedback : 0.f;
 
@@ -187,7 +196,22 @@ public:
             }
             for (int c = 0; c < channels; c++) {
                 float x = data[i * channels + c] / 32768.f;
+                const float raw = x;   // gate ke liye asli mic level (EQ se pehle)
                 x = f_[c][0].run(x); x = f_[c][1].run(x); x = f_[c][2].run(x); x = f_[c][3].run(x);
+                x = f_[c][4].run(x);                                              // mud cut
+                {                                                                  // noise gate
+                    float ax = std::fabs(raw);
+                    genv_[c] = ax > genv_[c] ? gAtk * genv_[c] + (1.f - gAtk) * ax
+                                             : gRel * genv_[c] + (1.f - gRel) * ax;
+                    if (genv_[c] > gThr) { gopen_[c] = true; ghold_[c] = gHold; }
+                    else if (ghold_[c] > 0) { ghold_[c]--; }
+                    else if (genv_[c] < gThr * 0.7f) { gopen_[c] = false; }
+                    float tgt = gopen_[c] ? 1.f : s.gateFloor;
+                    float cc = tgt > ggain_[c] ? gOpenC : gCloseC;
+                    ggain_[c] = cc * ggain_[c] + (1.f - cc) * tgt;
+                    x *= ggain_[c];
+                    if (c == 0 && gopen_[0]) openCnt_++;
+                }
                 x = c1_[c].run(x, cv1_, a1, r1);
                 x = c2_[c].run(x, cv2_, a2, r2);
                 x *= s.loudness * gain;
@@ -222,14 +246,18 @@ public:
                 if (cnt_ >= (size_t)blockLen * channels) {
                     float rms = std::sqrt(sum_ / (float)cnt_);
                     float db = 20.f * std::log10(std::max(rms, 0.00001f));
-                    if (db < s.sustainTargetDb) {
+                    float openFrac = (float)openCnt_ / (float)std::max(1, blockLen);
+                    openCnt_ = 0;
+                    if (openFrac < 0.25f) {            // bol nahi rahe: noise ko mat uthao
+                        sgCur_ = std::max(1.f, sgCur_ * 0.97f);
+                    } else if (db < s.sustainTargetDb) {
                         float lift = 1.f + std::min(1.2f, std::max(0.02f, (s.sustainTargetDb - db) * 0.035f));
                         sgCur_ = std::min(s.sustainMax, sgCur_ * lift);
                     } else sgCur_ = std::max(1.f, sgCur_ * 0.82f);
                     sgTarget_ = sgCur_;
                     sum_ = 0; cnt_ = 0;
                 }
-            } else { sg_ = 1.f; sgTarget_ = 1.f; sgCur_ = 1.f; sum_ = 0; cnt_ = 0; }
+            } else { sg_ = 1.f; sgTarget_ = 1.f; sgCur_ = 1.f; sum_ = 0; cnt_ = 0; openCnt_ = 0; }
         }
     }
 private:
@@ -240,7 +268,8 @@ private:
             dlen_ = std::max(1, (int)(s.reverbDelay * sr_));
             dl_[c].assign(dlen_, 0.f);
         }
-        dp_ = 0; sg_ = sgTarget_ = sgCur_ = 1.f; sum_ = 0; cnt_ = 0;
+        dp_ = 0; sg_ = sgTarget_ = sgCur_ = 1.f; sum_ = 0; cnt_ = 0; openCnt_ = 0;
+        for (int c = 0; c < 2; c++) { genv_[c] = 0.f; ggain_[c] = 1.f; ghold_[c] = 0; gopen_[c] = true; }
     }
     void setFilters(const Settings& s) {
         for (int c = 0; c < 2; c++) {
@@ -248,13 +277,18 @@ private:
             f_[c][1].lowShelf(sr_, 200, s.bassDb);
             f_[c][2].peaking(sr_, 3200, 1.5, s.presenceDb);
             f_[c][3].highShelf(sr_, 6000, s.trebleDb);
+            f_[c][4].peaking(sr_, s.mudFreq, 1.0, s.mudDb);
         }
         cv1_.init(s.thresholdDb, s.knee1, s.ratio);
         cv2_.init(s.comp2ThrDb, s.comp2Knee, s.comp2Ratio);
         cvL_.init(s.limiterDb, 0.f, 20.f);
     }
     int sr_ = 0, ch_ = 0, dlen_ = 1, dp_ = 0;
-    Biquad f_[2][4];
+    Biquad f_[2][5];
+    float genv_[2] = {0, 0}, ggain_[2] = {1, 1};
+    int ghold_[2] = {0, 0};
+    bool gopen_[2] = {true, true};
+    size_t openCnt_ = 0;
     Comp c1_[2], c2_[2], lim_[2];
     Curve cv1_, cv2_, cvL_;
     std::vector<float> dl_[2];
