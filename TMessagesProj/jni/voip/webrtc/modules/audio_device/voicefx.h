@@ -35,8 +35,8 @@ struct Settings {
     bool  sustain = true; float sustainTargetDb = -8.f, sustainMax = 12.f;
     // clarity: gunj (mud) kam + halka noise gate
     float mudDb = -3.5f, mudFreq = 320.f;
-    float gateDb = -48.f, gateFloor = 0.004f;
-    float keepNoise = 0.0004f;   // halka continuous noise (~ -68 dBFS), stream ko zinda rakhta hai
+    float gateDb = -52.f, gateFloor = 0.03f;
+    float keepNoise = 0.003f;    // halka smooth noise (panel slider se badlo)
     bool  reverb = true;  float reverbDelay = 0.035f, reverbFeedback = 0.18f, reverbWet = 0.08f;
 };
 
@@ -182,8 +182,8 @@ public:
         const float gAtk = std::exp(-1.f / (0.002f * sr));
         const float gRel = std::exp(-1.f / (0.060f * sr));
         const float gOpenC = std::exp(-1.f / (0.003f * sr));
-        const float gCloseC = std::exp(-1.f / (0.040f * sr));
-        const int gHold = (int)(0.150f * sr);
+        const float gCloseC = std::exp(-1.f / (0.120f * sr));
+        const int gHold = (int)(0.400f * sr);
         const float wet = s.reverb ? s.reverbWet : 0.f;
         const float fb = s.reverb ? s.reverbFeedback : 0.f;
 
@@ -235,7 +235,9 @@ public:
                 sum_ += dry * dry; cnt_++;
                 // keep-alive noise (hamesha halka noise, silence kabhi nahi)
                 rng_ = rng_ * 1664525u + 1013904223u;
-                dry += s.keepNoise * ((float)(rng_ >> 8) / 8388608.f - 1.f);
+                float wn = (float)(rng_ >> 8) / 8388608.f - 1.f;
+                nz_[c] = 0.85f * nz_[c] + 0.15f * wn;       // smooth (patla hiss nahi, naram noise)
+                dry += s.keepNoise * 3.5f * nz_[c];
                 dry += cs;   // phone ki file ki awaaz (effect chain ke baad, saaf)
                 dry = std::max(-0.999f, std::min(0.999f, dry));
                 data[i * channels + c] = (int16_t)(dry * 32767.f);
@@ -295,6 +297,7 @@ private:
     float sg_ = 1.f, sgTarget_ = 1.f, sgCur_ = 1.f, sum_ = 0.f;
     size_t cnt_ = 0;
     uint32_t rng_ = 12345u;
+    float nz_[2] = {0.f, 0.f};
 };
 
 inline Processor& processor() { static Processor p; return p; }
@@ -315,6 +318,10 @@ Java_org_telegram_messenger_VoiceFxBridge_nativeSet(JNIEnv*, jclass,
 #endif
 
 #ifdef __ANDROID__
+extern "C" JNIEXPORT void JNICALL
+Java_org_telegram_messenger_VoiceFxBridge_nativeNoise(JNIEnv*, jclass, jfloat n) {
+    nxcfx::settings().keepNoise = n;
+}
 extern "C" JNIEXPORT void JNICALL
 Java_org_telegram_messenger_VoiceFxBridge_nativeEnable(JNIEnv*, jclass, jboolean on) {
     nxcfx::settings().enabled = (on != JNI_FALSE);
