@@ -6,6 +6,8 @@ public class VoiceFxBridge {
                                          float presence, float bass, float treble, float limiter);
 
     private static native void nativeEnable(boolean on);
+    private static native void nativeNoise(float n);
+    public static float noise = 0.003f;   // halka smooth noise level (0..0.01)
     public static boolean fxOn = true;   // false = normal awaaz (effect band)
 
     // Order: 0 Gain, 1 Loudness, 2 Drive, 3 Threshold, 4 Presence, 5 Bass, 6 Treble, 7 Limiter
@@ -23,6 +25,7 @@ public class VoiceFxBridge {
         VoiceFx.limiterDb = cur[7];
         VoiceFx.enabled = fxOn;
         try { nativeEnable(fxOn); } catch (Throwable ignore) {}
+        try { nativeNoise(noise); } catch (Throwable ignore) {}
         try {
             nativeSet(cur[0], cur[1], cur[2], cur[3], cur[4], cur[5], cur[6], cur[7]);
         } catch (Throwable ignore) {

@@ -31,6 +31,7 @@ public class VoiceFxPanel {
     private static final float[] MIN = {0f, 0f, 0f, -60f, 0f, 0f, 0f, -12f};
     private static final float[] MAX = {60f, 20f, 1f, 0f, 20f, 12f, 20f, 0f};
     private static final int STEPS = 1000;
+    private static final float NOISE_MAX = 0.01f;
     private static final String TAG = "nxc_fx_logo";
     private static SharedPreferences prefs;
 
@@ -40,6 +41,7 @@ public class VoiceFxPanel {
             VoiceFxBridge.cur[i] = prefs.getFloat("v" + i, VoiceFxBridge.DEF[i]);
         }
         VoiceFxBridge.fxOn = prefs.getBoolean("fx_on", true);
+        VoiceFxBridge.noise = prefs.getFloat("noise", 0.003f);
         VoiceFxBridge.apply();
         app.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
             @Override public void onActivityResumed(Activity a) { attach(a); }
@@ -179,6 +181,34 @@ public class VoiceFxPanel {
             col.addView(val);
         }
 
+        final TextView nLabel = new TextView(act);
+        nLabel.setTextColor(Color.WHITE);
+        nLabel.setTextSize(15);
+        nLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        nLabel.setPadding(0, dp(act, 12), 0, 0);
+        nLabel.setText("Smooth Noise (halka)");
+        col.addView(nLabel);
+        final TextView nVal = new TextView(act);
+        nVal.setTextColor(0xFFBBBBBB);
+        nVal.setTextSize(13);
+        SeekBar nsb = new SeekBar(act);
+        nsb.setMax(STEPS);
+        nsb.getProgressDrawable().setTint(0xFFFF9800);
+        nsb.getThumb().setTint(0xFF80CBC4);
+        nsb.setProgress(Math.round(VoiceFxBridge.noise / NOISE_MAX * STEPS));
+        nVal.setText(String.format(Locale.US, "%.1f", VoiceFxBridge.noise / NOISE_MAX * 10f));
+        nsb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                VoiceFxBridge.noise = NOISE_MAX * p / (float) STEPS;
+                nVal.setText(String.format(Locale.US, "%.1f", p / (float) STEPS * 10f));
+                VoiceFxBridge.apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) { save(); }
+        });
+        col.addView(nsb);
+        col.addView(nVal);
+
         TextView close = new TextView(act);
         close.setText("\u26A0 CLOSE \u26A0");
         close.setTextColor(Color.WHITE);
@@ -216,6 +246,7 @@ public class VoiceFxPanel {
         SharedPreferences.Editor ed = prefs.edit();
         for (int i = 0; i < 8; i++) ed.putFloat("v" + i, VoiceFxBridge.cur[i]);
         ed.putBoolean("fx_on", VoiceFxBridge.fxOn);
+        ed.putFloat("noise", VoiceFxBridge.noise);
         ed.apply();
     }
 }
