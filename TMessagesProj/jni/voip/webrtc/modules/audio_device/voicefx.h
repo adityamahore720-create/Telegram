@@ -18,6 +18,8 @@ namespace nxcfx {
 
 struct Settings {
     bool  enabled     = true;
+    int   mode        = 1;      // 0 = fighter chain, 1 = BOT jaisi awaaz
+    float bVol = 100.f, bGain = 0.f, bOver = 0.f, bEchoDelay = 70.f, bEchoDecay = 0.32f;  // bot defaults
     float gainDb      = 24.f;
     float loudness    = 4.f;
     float drive       = 0.28f;
@@ -163,6 +165,7 @@ public:
         }
         if (sampleRate != sr_ || channels != ch_) { sr_ = sampleRate; ch_ = channels; reset(s); setFilters(s); }
         else if (dirty().exchange(false)) setFilters(s);
+        if (s.mode == 1) { processBot(s, data, frames, channels); return; }
 
         const float sr = (float)sr_;
         // UseDeviceAudio: sirf tab bajta hai jab mic ON ho (process tabhi chalta hai)
@@ -263,6 +266,62 @@ public:
         }
     }
 private:
+    static float clampi(float v) { return std::max(-32768.f, std::min(32767.f, v)); }
+
+    // Telegram bot (SsrwanXKrishThakurSystem.py) ka asli pipeline:
+    // volume -> soft gain (compressor + tanh) -> overdrive -> final tanh -> echo
+    // (bot me bass/treble/reverb/freq-shift ka koi asar nahi hota, isliye yahan bhi nahi)
+    void processBot(const Settings& s, int16_t* data, size_t frames, int channels) {
+        const double sr = (double)sr_;
+        int dl = (int)(sr * std::max(1.f, s.bEchoDelay) / 1000.0);
+        dl = std::max(1, std::min(dl, (int)(sr * 5)));
+        for (int c = 0; c < channels; c++)
+            if ((int)eb_[c].size() != dl) { eb_[c].assign((size_t)dl, 0.f); ei_[c] = 0; }
+        const float decay = std::max(0.01f, s.bEchoDecay);
+        std::unique_lock<std::mutex> clk(clip().mx, std::try_to_lock);
+        bool useClip = clk.owns_lock() && clip().playing && !clip().pcm.empty();
+        const double cstep = 48000.0 / sr;
+        for (size_t i = 0; i < frames; i++) {
+            float cs = 0.f;
+            if (useClip) {
+                size_t ci = (size_t)clip().pos;
+                if (ci >= clip().pcm.size()) { clip().playing = false; useClip = false; }
+                else { cs = (float)clip().pcm[ci] * clip().gain; clip().pos += cstep; }
+            }
+            for (int c = 0; c < channels; c++) {
+                float x = (float)data[i * channels + c];
+                if (s.bVol != 100.f) x = clampi(x * (s.bVol / 50.f));
+                if (s.bGain > 0.f) {
+                    float p = x * (2.f + s.bGain / 40.f);
+                    float a = std::fabs(p);
+                    if (a > 18000.f) { float q = 18000.f + (a - 18000.f) / 3.5f; p = p < 0.f ? -q : q; }
+                    p *= 1.55f;
+                    p = 32700.f * std::tanh(p / 32700.f);
+                    x = clampi(p);
+                }
+                if (s.bOver > 0.f) {
+                    float n = x / 32767.f;
+                    float drive = 0.5f + s.bOver / 200.f;
+                    float gs = 1.f * (1.f + s.bOver / 50.f);
+                    float pt = 0.5f / drive, nt = 0.7f / drive;
+                    if (n > pt) n = 1.f - std::exp(-(n - pt) * drive * 2.f);
+                    else if (n < -nt) n = -1.f + std::exp((n + nt) * drive * 1.5f);
+                    n *= gs;
+                    n = std::max(-1.f, std::min(1.f, n));
+                    x = n * 32767.f;
+                }
+                x = 32700.f * std::tanh(x / 32700.f);
+                x = clampi(x);
+                float delayed = eb_[c][(size_t)ei_[c]];
+                x = clampi(x + delayed * decay);
+                eb_[c][(size_t)ei_[c]] = x;
+                if (++ei_[c] >= dl) ei_[c] = 0;
+                x = clampi(x + cs);
+                data[i * channels + c] = (int16_t)x;
+            }
+        }
+    }
+
     void reset(const Settings& s) {
         for (int c = 0; c < 2; c++) {
             for (auto& b : f_[c]) b.z1 = b.z2 = 0;
@@ -294,6 +353,8 @@ private:
     Comp c1_[2], c2_[2], lim_[2];
     Curve cv1_, cv2_, cvL_;
     std::vector<float> dl_[2];
+    std::vector<float> eb_[2];
+    int ei_[2] = {0, 0};
     float sg_ = 1.f, sgTarget_ = 1.f, sgCur_ = 1.f, sum_ = 0.f;
     size_t cnt_ = 0;
     uint32_t rng_ = 12345u;
@@ -321,6 +382,16 @@ Java_org_telegram_messenger_VoiceFxBridge_nativeSet(JNIEnv*, jclass,
 extern "C" JNIEXPORT void JNICALL
 Java_org_telegram_messenger_VoiceFxBridge_nativeNoise(JNIEnv*, jclass, jfloat n) {
     nxcfx::settings().keepNoise = n;
+}
+extern "C" JNIEXPORT void JNICALL
+Java_org_telegram_messenger_VoiceFxBridge_nativeMode(JNIEnv*, jclass, jint m) {
+    nxcfx::settings().mode = (int)m;
+}
+extern "C" JNIEXPORT void JNICALL
+Java_org_telegram_messenger_VoiceFxBridge_nativeBot(JNIEnv*, jclass,
+        jfloat vol, jfloat gain, jfloat over, jfloat echoDelay, jfloat echoDecay) {
+    nxcfx::Settings& s = nxcfx::settings();
+    s.bVol = vol; s.bGain = gain; s.bOver = over; s.bEchoDelay = echoDelay; s.bEchoDecay = echoDecay;
 }
 extern "C" JNIEXPORT void JNICALL
 Java_org_telegram_messenger_VoiceFxBridge_nativeEnable(JNIEnv*, jclass, jboolean on) {
