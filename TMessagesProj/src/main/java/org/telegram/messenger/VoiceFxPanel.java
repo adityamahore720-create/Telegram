@@ -34,16 +34,31 @@ public class VoiceFxPanel {
     private static final float NOISE_MAX = 0.01f;
     private static final String TAG = "nxc_fx_logo";
     private static SharedPreferences prefs;
+    // false = floating NXC logo/panel nahi dikhega (sirf Quick Settings tile se on/off)
+    private static final boolean SHOW_LOGO = true;
+    private static final String[] BNAMES = {"Volume (level)", "Gain", "Overdrive", "Echo Delay (ms)", "Echo Decay"};
+    private static final float[] BMIN = {0f, 0f, 0f, 0f, 0f};
+    private static final float[] BMAX = {400f, 200f, 100f, 500f, 1.2f};
 
     public static void init(Application app) {
         prefs = app.getSharedPreferences("nxc_voicefx", Context.MODE_PRIVATE);
+        if (!prefs.contains("tile_preset")) {   // pehli baar: screenshot wali awaaz set, effect OFF
+            SharedPreferences.Editor e = prefs.edit();
+            for (int i = 0; i < 8; i++) e.putFloat("v" + i, VoiceFxTile.PRESET[i]);
+            e.putFloat("noise", VoiceFxTile.PRESET_NOISE);
+            e.putBoolean("fx_on", false);
+            e.putBoolean("tile_preset", true);
+            e.apply();
+        }
         for (int i = 0; i < 8; i++) {
             VoiceFxBridge.cur[i] = prefs.getFloat("v" + i, VoiceFxBridge.DEF[i]);
         }
         VoiceFxBridge.fxOn = prefs.getBoolean("fx_on", true);
         VoiceFxBridge.noise = prefs.getFloat("noise", 0.003f);
+        VoiceFxBridge.mode = prefs.getInt("mode", 1);
+        for (int i = 0; i < 5; i++) VoiceFxBridge.bot[i] = prefs.getFloat("b" + i, VoiceFxBridge.botDef[i]);
         VoiceFxBridge.apply();
-        app.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+        if (SHOW_LOGO) app.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
             @Override public void onActivityResumed(Activity a) { attach(a); }
             @Override public void onActivityCreated(Activity a, Bundle b) {}
             @Override public void onActivityStarted(Activity a) {}
@@ -110,7 +125,7 @@ public class VoiceFxPanel {
         col.setBackground(box);
 
         TextView title = new TextView(act);
-        title.setText("NXC FIGHTER ~ SYSTEM");
+        title.setText("KRISH X SARWAN");
         title.setTextColor(Color.WHITE);
         title.setTextSize(18);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -145,6 +160,36 @@ public class VoiceFxPanel {
             }
         });
         col.addView(fxBtn);
+
+        final TextView modeBtn = new TextView(act);
+        modeBtn.setTextColor(Color.WHITE);
+        modeBtn.setTextSize(15);
+        modeBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        modeBtn.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(act, 44));
+        mlp.topMargin = dp(act, 10);
+        modeBtn.setLayoutParams(mlp);
+        GradientDrawable mg = new GradientDrawable();
+        mg.setCornerRadius(dp(act, 14));
+        mg.setColor(0xFF1A237E);
+        mg.setStroke(dp(act, 2), 0xFF448AFF);
+        modeBtn.setBackground(mg);
+        modeBtn.setText(VoiceFxBridge.mode == 1 ? "MODE: BOT VOICE (tap = FIGHTER)" : "MODE: FIGHTER (tap = BOT VOICE)");
+        modeBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                VoiceFxBridge.mode = VoiceFxBridge.mode == 1 ? 0 : 1;
+                VoiceFxBridge.apply();
+                save();
+                d.dismiss();
+                showPanel(act);
+            }
+        });
+        col.addView(modeBtn);
+
+        if (VoiceFxBridge.mode == 1) {
+            for (int bi = 0; bi < 5; bi++) addBotSlider(act, col, bi);
+        } else {
 
         for (int i = 0; i < 8; i++) {
             final int idx = i;
@@ -208,6 +253,7 @@ public class VoiceFxPanel {
         });
         col.addView(nsb);
         col.addView(nVal);
+        }
 
         TextView close = new TextView(act);
         close.setText("\u26A0 CLOSE \u26A0");
@@ -241,12 +287,46 @@ public class VoiceFxPanel {
         d.show();
     }
 
+    private static void addBotSlider(Activity act, LinearLayout col, final int idx) {
+        TextView label = new TextView(act);
+        label.setTextColor(Color.WHITE);
+        label.setTextSize(15);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setPadding(0, dp(act, 12), 0, 0);
+        label.setText(BNAMES[idx]);
+        col.addView(label);
+        final TextView val = new TextView(act);
+        val.setTextColor(0xFFBBBBBB);
+        val.setTextSize(13);
+        SeekBar sb = new SeekBar(act);
+        sb.setMax(STEPS);
+        sb.getProgressDrawable().setTint(0xFFFF9800);
+        sb.getThumb().setTint(0xFF80CBC4);
+        float cur = VoiceFxBridge.bot[idx];
+        sb.setProgress(Math.round((cur - BMIN[idx]) / (BMAX[idx] - BMIN[idx]) * STEPS));
+        val.setText(String.format(Locale.US, "%.2f", cur));
+        sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                float v = BMIN[idx] + (BMAX[idx] - BMIN[idx]) * p / (float) STEPS;
+                VoiceFxBridge.bot[idx] = v;
+                val.setText(String.format(Locale.US, "%.2f", v));
+                VoiceFxBridge.apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) { save(); }
+        });
+        col.addView(sb);
+        col.addView(val);
+    }
+
     private static void save() {
         if (prefs == null) return;
         SharedPreferences.Editor ed = prefs.edit();
         for (int i = 0; i < 8; i++) ed.putFloat("v" + i, VoiceFxBridge.cur[i]);
         ed.putBoolean("fx_on", VoiceFxBridge.fxOn);
         ed.putFloat("noise", VoiceFxBridge.noise);
+        ed.putInt("mode", VoiceFxBridge.mode);
+        for (int i = 0; i < 5; i++) ed.putFloat("b" + i, VoiceFxBridge.bot[i]);
         ed.apply();
     }
 }
