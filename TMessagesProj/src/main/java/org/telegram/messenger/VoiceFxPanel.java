@@ -34,6 +34,9 @@ public class VoiceFxPanel {
     private static final float NOISE_MAX = 0.01f;
     private static final String TAG = "nxc_fx_logo";
     private static SharedPreferences prefs;
+    // Pehli baar ki default fighter awaaz (screenshot wali)
+    private static final float[] PRESET = {32.88f, 6.44f, 0.20f, -41.70f, 6.14f, 2.84f, 10.48f, -7.00f};
+    private static final float PRESET_NOISE = 0.0055f;
     // false = floating NXC logo/panel nahi dikhega (sirf Quick Settings tile se on/off)
     private static final boolean SHOW_LOGO = true;
     private static final String[] BNAMES = {"Volume (level)", "Gain", "Overdrive", "Echo Delay (ms)", "Echo Decay"};
@@ -44,8 +47,8 @@ public class VoiceFxPanel {
         prefs = app.getSharedPreferences("nxc_voicefx", Context.MODE_PRIVATE);
         if (!prefs.contains("tile_preset")) {   // pehli baar: screenshot wali awaaz set, effect OFF
             SharedPreferences.Editor e = prefs.edit();
-            for (int i = 0; i < 8; i++) e.putFloat("v" + i, VoiceFxTile.PRESET[i]);
-            e.putFloat("noise", VoiceFxTile.PRESET_NOISE);
+            for (int i = 0; i < 8; i++) e.putFloat("v" + i, PRESET[i]);
+            e.putFloat("noise", PRESET_NOISE);
             e.putBoolean("fx_on", false);
             e.putBoolean("tile_preset", true);
             e.apply();
