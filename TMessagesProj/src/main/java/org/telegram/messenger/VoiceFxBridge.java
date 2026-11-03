@@ -7,12 +7,10 @@ public class VoiceFxBridge {
 
     private static native void nativeEnable(boolean on);
     private static native void nativeNoise(float n);
-    private static native void nativeMode(int m);
-    private static native void nativeBot(float vol, float gain, float over, float echoDelay, float echoDecay);
-    public static int mode = 1;   // 0 = fighter, 1 = bot jaisi awaaz
-    // bot: volume(level), gain, overdrive, echo delay (ms), echo decay
-    public static final float[] botDef = {100f, 0f, 0f, 70f, 0.32f};
-    public static final float[] bot = botDef.clone();
+    private static native void nativeEcho(float delayMs, float repeatGain);
+    // Repeat echo: bolne ke baad saaf dusri copy (2 baar sunai dega)
+    public static float echoDelayMs = 220f;
+    public static float echoRepeatGain = 0.45f;
     public static float noise = 0.003f;   // halka smooth noise level (0..0.01)
     public static boolean fxOn = true;   // false = normal awaaz (effect band)
 
@@ -32,7 +30,7 @@ public class VoiceFxBridge {
         VoiceFx.enabled = fxOn;
         try { nativeEnable(fxOn); } catch (Throwable ignore) {}
         try { nativeNoise(noise); } catch (Throwable ignore) {}
-        try { nativeMode(mode); nativeBot(bot[0], bot[1], bot[2], bot[3], bot[4]); } catch (Throwable ignore) {}
+        try { nativeEcho(echoDelayMs, echoRepeatGain); } catch (Throwable ignore) {}
         try {
             nativeSet(cur[0], cur[1], cur[2], cur[3], cur[4], cur[5], cur[6], cur[7]);
         } catch (Throwable ignore) {
