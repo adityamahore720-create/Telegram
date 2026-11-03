@@ -37,9 +37,9 @@ struct Settings {
     float mudDb = -3.5f, mudFreq = 320.f;
     float gateDb = -52.f, gateFloor = 0.03f;
     float keepNoise = 0.003f;    // halka smooth noise (panel slider se badlo)
-    bool  reverb = true;  float reverbDelay = 0.035f, reverbFeedback = 0.18f, reverbWet = 0.08f;
+    bool  reverb = true;  float reverbDelay = 0.055f, reverbFeedback = 0.42f, reverbWet = 0.20f;   // gunj (reverb tail), repeat nahi
     // Repeat echo (bolne ki saaf dusri copy, reverb se alag)
-    float echoDelayMs = 220.f, echoRepeatGain = 0.45f;
+    float echoDelayMs = 220.f, echoRepeatGain = 0.f;   // 0 = repeat band
 };
 
 inline Settings& settings() { static Settings s; return s; }
