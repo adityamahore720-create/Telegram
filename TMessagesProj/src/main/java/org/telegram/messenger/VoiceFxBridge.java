@@ -10,7 +10,7 @@ public class VoiceFxBridge {
     private static native void nativeEcho(float delayMs, float repeatGain);
     // Repeat echo: bolne ke baad saaf dusri copy (2 baar sunai dega)
     public static float echoDelayMs = 220f;
-    public static float echoRepeatGain = 0.45f;
+    public static float echoRepeatGain = 0f;   // 0 = repeat band
     public static float noise = 0.003f;   // halka smooth noise level (0..0.01)
     public static boolean fxOn = true;   // false = normal awaaz (effect band)
 
